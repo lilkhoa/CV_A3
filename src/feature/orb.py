@@ -23,7 +23,7 @@ def extract_orb_features(
     Tuple[List[cv2.KeyPoint], np.ndarray]
         - keypoints: List of detected feature points with 2D coordinates (x, y),
                      size, and orientation angle
-        - descriptors: Binary descriptor vectors (32 bytes / 256 bits each)
+        - descriptors: Binary descriptor vectors (256 bits each)
                       acting as "fingerprints" for keypoint matching             
     """
 
