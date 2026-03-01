@@ -198,65 +198,117 @@ class PanoramaStitcher:
             print(f"  Image {i+1} warped and blended.")
 
         panorama = panorama_final
-        
+        # ==============================
         # Step 7: Crop black borders
+        # ==============================
         print("\n[Step 7] Cropping black borders...")
-        panorama = self._crop_black_borders(panorama)
+        panorama_cropped, bbox = self._crop_black_borders(panorama)
 
         print("\n--- Stitching Pipeline Completed ---")
         
         if output_path is not None:
             os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-            cv2.imwrite(output_path, panorama)
+            
+            base_dir = os.path.dirname(output_path)
+            basename = os.path.basename(output_path)
+            name, ext = os.path.splitext(basename)
+            
+            # 1. Save uncropped
+            uncropped_path = os.path.join(base_dir, f"{name}_uncropped{ext}")
+            cv2.imwrite(uncropped_path, panorama)
+            print(f"Uncropped panorama saved to: {uncropped_path}")
+            
+            # 2. Save rect
+            if bbox is not None:
+                x, y, w, h = bbox
+                rect_img = panorama.copy()
+                thickness = max(2, int(max(panorama.shape[:2]) * 0.002))
+                cv2.rectangle(rect_img, (x, y), (x+w, y+h), (0, 255, 0), thickness)
+                rect_path = os.path.join(base_dir, f"{name}_rect{ext}")
+                cv2.imwrite(rect_path, rect_img)
+                print(f"Panorama with crop rect saved to: {rect_path}")
+                
+            # 3. Save cropped (final)
+            cv2.imwrite(output_path, panorama_cropped)
             print(f"Final panorama saved to: {output_path}")
             
-        return panorama
+        return panorama_cropped
 
-    def _crop_black_borders(self, img: np.ndarray) -> np.ndarray:
+    def _crop_black_borders(self, img: np.ndarray) -> Tuple[np.ndarray, Optional[Tuple[int, int, int, int]]]:
         """
-        Crop the black (zero) border regions from the panorama to get a clean rectangle.
-        Iteratively shrinks the bounding box until no black pixels remain on its edges.
+        Crop the black (zero) border regions using the Maximum Inscribed Rectangle algorithm.
+        To ensure speed, it downscales the mask, finds the approximate max rectangle, 
+        and then refines it at full resolution.
+        Returns the cropped image and the bounding box.
         """
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        
-        # Threshold: pixels > 0 are considered valid
         _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY)
         
-        # Find contours
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # 1. Downscale for fast approximation
+        # Use INTER_AREA so a downscaled pixel is only 255 if the ENTIRE block is 255
+        scale = 0.25
+        small_mask = cv2.resize(thresh, (0,0), fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        _, small_mask = cv2.threshold(small_mask, 254, 255, cv2.THRESH_BINARY)
+        h, w = small_mask.shape
         
-        if not contours:
-            return img
+        # 2. Find max inscribed rectangle on small mask
+        max_area = 0
+        best_rect = (0, 0, 0, 0)
+        heights = np.zeros(w, dtype=np.int32)
         
-        # Get the bounding box of the largest contour
-        largest = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(largest)
+        for i in range(h):
+            heights = np.where(small_mask[i] > 0, heights + 1, 0)
+            stack = []
+            for j in range(w + 1):
+                curr_h = heights[j] if j < w else 0
+                start_j = j
+                while stack and stack[-1][1] > curr_h:
+                    pos, height = stack.pop()
+                    area = height * (j - pos)
+                    if area > max_area:
+                        max_area = area
+                        best_rect = (pos, i - height + 1, j - pos, height)
+                    start_j = pos
+                stack.append((start_j, curr_h))
+                
+        # 3. Scale back to original resolution
+        x, y, w_r, h_r = best_rect
+        x = int(x / scale)
+        y = int(y / scale)
+        w_r = int(w_r / scale)
+        h_r = int(h_r / scale)
         
-        # Iteratively shrink bounding box
-        while w > 0 and h > 0:
-            sub_img = thresh[y:y+h, x:x+w]
-            if cv2.countNonZero(sub_img) == w * h:
+        # Ensure within bounds
+        h_full, w_full = thresh.shape
+        x = max(0, x)
+        y = max(0, y)
+        w_r = min(w_full - x, w_r)
+        h_r = min(h_full - y, h_r)
+        
+        # 4. Refine at full resolution (shrink if any black pixels remain at edges)
+        while w_r > 0 and h_r > 0:
+            sub_img = thresh[y:y+h_r, x:x+w_r]
+            if cv2.countNonZero(sub_img) == w_r * h_r:
                 break
                 
-            # Find the edge with the most zeros and shrink it
-            top = w - cv2.countNonZero(sub_img[0, :])
-            bottom = w - cv2.countNonZero(sub_img[-1, :])
-            left = h - cv2.countNonZero(sub_img[:, 0])
-            right = h - cv2.countNonZero(sub_img[:, -1])
+            top = w_r - cv2.countNonZero(sub_img[0, :])
+            bottom = w_r - cv2.countNonZero(sub_img[-1, :])
+            left = h_r - cv2.countNonZero(sub_img[:, 0])
+            right = h_r - cv2.countNonZero(sub_img[:, -1])
             
             m = max(top, bottom, left, right)
             if m == top: 
                 y += 1
-                h -= 1
+                h_r -= 1
             elif m == bottom: 
-                h -= 1
+                h_r -= 1
             elif m == left: 
                 x += 1
-                w -= 1
+                w_r -= 1
             else: 
-                w -= 1
-        
-        if w <= 0 or h <= 0:
-            return img
+                w_r -= 1
+                
+        if w_r <= 0 or h_r <= 0:
+            return img, None
             
-        return img[y:y+h, x:x+w]
+        return img[y:y+h_r, x:x+w_r], (x, y, w_r, h_r)

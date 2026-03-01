@@ -56,15 +56,8 @@ def warp_and_blend(
     ], dtype=np.float32)
 
     # Warp img1 onto the final canvas size using the combined transformation (Translation * Homography)
-    canvas_w = int(xmax - xmin)
-    canvas_h = int(ymax - ymin)
-    
-    # --- Guard against extreme Homography estimation failure causing OutOfMemoryError ---
-    MAX_CANVAS_SIZE = 15000
-    if canvas_w > MAX_CANVAS_SIZE or canvas_h > MAX_CANVAS_SIZE or canvas_w <= 0 or canvas_h <= 0:
-        print(f"      [WARNING] Extreme distorted canvas size ({canvas_w}x{canvas_h}). Homography is likely invalid.")
-        return img2.copy() # Return the original panorama, ignore this bad image
-    # -----------------------------------------------------------------------------------
+    canvas_w = xmax - xmin
+    canvas_h = ymax - ymin
 
     # Warp img1
     warped_img1 = cv2.warpPerspective(
