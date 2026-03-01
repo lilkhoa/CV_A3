@@ -9,6 +9,9 @@ from feature.orb import extract_orb_features
 from core.matcher import match_features
 from core.homography import estimate_homography
 from core.cylindrical import cylindrical_projection
+from core.warp import warp_images_to_canvas
+from core.blender import alpha_blend_images, create_weight_mask
+from utils import crop_black_borders
 
 
 class PanoramaStitcher:
@@ -35,16 +38,6 @@ class PanoramaStitcher:
             return extract_orb_features(gray_image, nfeatures=self.nfeatures)
         else:
             raise ValueError(f"Unsupported feature extraction method: {self.feature_method}")
-
-    def _create_distance_weight_mask(self, mask: np.ndarray) -> np.ndarray:
-        """
-        Create a weight mask using distance transform.
-        Pixels further from the edge (black border) get higher weights.
-        """
-        dist = cv2.distanceTransform(mask.astype(np.uint8), cv2.DIST_L2, 3)
-        if dist.max() > 0:
-            dist = dist / dist.max()
-        return dist
 
     def stitch_folder(self, image_folder: str, output_path: Optional[str] = None) -> Optional[np.ndarray]:
         """
@@ -164,44 +157,38 @@ class PanoramaStitcher:
             [0, 0, 1]
         ], dtype=np.float64)
 
-        # Step 6: Warp all images and blend using center-weighted blending
-        print("\n[Step 6] Warping and blending all images...")
+        # Step 6: Warp all images onto the canvas
+        print("\n[Step 6] Warping all images onto canvas...")
         
-        panorama_final = np.zeros((canvas_h, canvas_w, 3), dtype=np.uint8)
-        max_weight = np.zeros((canvas_h, canvas_w), dtype=np.float32)
-
+        # Prepare final homographies (translation + cumulative homography)
+        final_homographies = [Ht @ cumulative_H[i] for i in range(n)]
+        
+        # Warp all images using the unified function
+        warped_images = warp_images_to_canvas(
+            color_images,
+            final_homographies,
+            (canvas_w, canvas_h)
+        )
+        
+        # Create weight masks for alpha blending
+        weight_masks = []
         for i in range(n):
-            # Combine translation with the cumulative homography
-            H_final = Ht @ cumulative_H[i]
-            
-            # Warp the color image
-            warped = cv2.warpPerspective(
-                color_images[i],
-                H_final,
+            weight = create_weight_mask(
+                color_images[i].shape[:2],
+                final_homographies[i],
                 (canvas_w, canvas_h)
             )
-            
-            # Create weight mask based on valid pixels of warped image using Distance Transform
-            mask_warped = cv2.warpPerspective(
-                np.ones(color_images[i].shape[:2], dtype=np.uint8) * 255,
-                H_final,
-                (canvas_w, canvas_h)
-            )
-            
-            warped_weight = self._create_distance_weight_mask(mask_warped)
-            
-            # Voronoi blending (sharp seam based on distance to center)
-            win_mask = warped_weight > max_weight
-            panorama_final[win_mask] = warped[win_mask]
-            max_weight[win_mask] = warped_weight[win_mask]
-            
-            print(f"  Image {i+1} warped and blended.")
-
-        panorama = panorama_final
+            weight_masks.append(weight)
+            print(f"  Image {i+1} warped.")
         
-        # Step 7: Crop black borders
-        print("\n[Step 7] Cropping black borders...")
-        panorama = self._crop_black_borders(panorama)
+        # Step 7: Blend images using Alpha Blending (Feathering)
+        print("\n[Step 7] Blending images using Alpha Blending (Feathering)...")
+        panorama = alpha_blend_images(warped_images, weight_masks)
+        print("  Blending complete.")
+
+        # Step 8: Crop black borders
+        print("\n[Step 8] Cropping black borders...")
+        panorama = crop_black_borders(panorama)
 
         print("\n--- Stitching Pipeline Completed ---")
         
@@ -211,52 +198,3 @@ class PanoramaStitcher:
             print(f"Final panorama saved to: {output_path}")
             
         return panorama
-
-    def _crop_black_borders(self, img: np.ndarray) -> np.ndarray:
-        """
-        Crop the black (zero) border regions from the panorama to get a clean rectangle.
-        Iteratively shrinks the bounding box until no black pixels remain on its edges.
-        """
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        
-        # Threshold: pixels > 0 are considered valid
-        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY)
-        
-        # Find contours
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        if not contours:
-            return img
-        
-        # Get the bounding box of the largest contour
-        largest = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(largest)
-        
-        # Iteratively shrink bounding box
-        while w > 0 and h > 0:
-            sub_img = thresh[y:y+h, x:x+w]
-            if cv2.countNonZero(sub_img) == w * h:
-                break
-                
-            # Find the edge with the most zeros and shrink it
-            top = w - cv2.countNonZero(sub_img[0, :])
-            bottom = w - cv2.countNonZero(sub_img[-1, :])
-            left = h - cv2.countNonZero(sub_img[:, 0])
-            right = h - cv2.countNonZero(sub_img[:, -1])
-            
-            m = max(top, bottom, left, right)
-            if m == top: 
-                y += 1
-                h -= 1
-            elif m == bottom: 
-                h -= 1
-            elif m == left: 
-                x += 1
-                w -= 1
-            else: 
-                w -= 1
-        
-        if w <= 0 or h <= 0:
-            return img
-            
-        return img[y:y+h, x:x+w]
