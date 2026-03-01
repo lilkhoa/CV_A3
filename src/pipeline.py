@@ -10,7 +10,7 @@ from core.matcher import match_features
 from core.homography import estimate_homography
 from core.cylindrical import cylindrical_projection
 from core.warp import warp_images_to_canvas
-from core.blender import alpha_blend_images, create_weight_mask
+from core.blender import voronoi_blend, create_weight_mask
 from utils import crop_black_borders
 
 
@@ -80,7 +80,7 @@ class PanoramaStitcher:
 
         # Step 3: Compute pairwise homographies between consecutive images
         print("\n[Step 3] Computing pairwise homographies...")
-        pairwise_H = []  # H[i] maps image i -> image i+1
+        pairwise_H = []
         for i in range(n - 1):
             print(f"  Matching image {i+1} <-> image {i+2}...")
             pts1, pts2 = match_features(
@@ -96,7 +96,6 @@ class PanoramaStitcher:
                 
             print(f"  Found {len(pts1)} good matches.")
             
-            # H maps points in image i to image i+1's coordinate system
             H, mask = estimate_homography(pts1, pts2)
             
             if H is None:
@@ -106,10 +105,9 @@ class PanoramaStitcher:
             pairwise_H.append(H)
 
         # Step 4: Chain homographies relative to center image
-        ref = n // 2  # Use middle image as reference (least distortion)
+        ref = n // 2
         print(f"\n[Step 4] Chaining homographies (reference image: {ref+1})...")
         
-        # cumulative_H[i] = transformation from image i to the reference image's coordinate system
         cumulative_H = [None] * n
         cumulative_H[ref] = np.eye(3, dtype=np.float64)
         
@@ -170,7 +168,7 @@ class PanoramaStitcher:
             (canvas_w, canvas_h)
         )
         
-        # Create weight masks for alpha blending
+        # Create weight masks for Voronoi blending
         weight_masks = []
         for i in range(n):
             weight = create_weight_mask(
@@ -181,9 +179,9 @@ class PanoramaStitcher:
             weight_masks.append(weight)
             print(f"  Image {i+1} warped.")
         
-        # Step 7: Blend images using Alpha Blending (Feathering)
-        print("\n[Step 7] Blending images using Alpha Blending (Feathering)...")
-        panorama = alpha_blend_images(warped_images, weight_masks)
+        # Step 7: Blend images using Voronoi blending
+        print("\n[Step 7] Blending images using Voronoi blending...")
+        panorama = voronoi_blend(warped_images, weight_masks)
         print("  Blending complete.")
 
         # Step 8: Crop black borders
