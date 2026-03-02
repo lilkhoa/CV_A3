@@ -10,7 +10,7 @@ from core.matcher import match_features
 from core.homography import estimate_homography
 from core.cylindrical import cylindrical_projection
 from core.warp import warp_images_to_canvas
-from core.blender import voronoi_blend, create_weight_mask
+from core.blender import voronoi_blend, alpha_blend, create_weight_mask
 from utils import crop_black_borders
 
 
@@ -179,9 +179,9 @@ class PanoramaStitcher:
             weight_masks.append(weight)
             print(f"  Image {i+1} warped.")
         
-        # Step 7: Blend images using Voronoi blending
-        print("\n[Step 7] Blending images using Voronoi blending...")
-        panorama = voronoi_blend(warped_images, weight_masks)
+        # Step 7: Blend images
+        print("\n[Step 7] Blending images using Alpha blending...")
+        panorama = alpha_blend(warped_images, weight_masks)
         print("  Blending complete.")
 
         # Step 8: Crop black borders
@@ -191,6 +191,7 @@ class PanoramaStitcher:
         print("\n--- Stitching Pipeline Completed ---")
         
         if output_path is not None:
+            output_path = os.path.join('results', os.path.basename(image_folder), self.feature_method.lower(), os.path.basename(output_path))
             os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
             
             base_dir = os.path.dirname(output_path)

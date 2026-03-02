@@ -11,5 +11,5 @@ python main.py --folder <folder_path> --output <output_path>
 ### Example
 
 ```bash
-python src/main.py --input "./data/BK-H6-imgs" --method SIFT --output "results/sift.jpg"
+python src/main.py --input "./data/BK-H6-imgs" --method SIFT --output "result.jpg" # We only need the name for the output images, the output will be automatically saved in the right subfolder of the `results` folder.
 ```
