@@ -186,7 +186,7 @@ class PanoramaStitcher:
 
         # Step 8: Crop black borders
         print("\n[Step 8] Cropping black borders...")
-        panorama = crop_black_borders(panorama)
+        panorama_cropped, bbox = crop_black_borders(panorama)
 
         print("\n--- Stitching Pipeline Completed ---")
         
@@ -216,4 +216,4 @@ class PanoramaStitcher:
             cv2.imwrite(output_path, panorama_cropped)
             print(f"Final panorama saved to: {output_path}")
             
-        return panorama
+        return panorama_cropped
