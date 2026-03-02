@@ -192,7 +192,28 @@ class PanoramaStitcher:
         
         if output_path is not None:
             os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-            cv2.imwrite(output_path, panorama)
+            
+            base_dir = os.path.dirname(output_path)
+            basename = os.path.basename(output_path)
+            name, ext = os.path.splitext(basename)
+            
+            # 1. Save uncropped
+            uncropped_path = os.path.join(base_dir, f"{name}_uncropped{ext}")
+            cv2.imwrite(uncropped_path, panorama)
+            print(f"Uncropped panorama saved to: {uncropped_path}")
+            
+            # 2. Save rect
+            if bbox is not None:
+                x, y, w, h = bbox
+                rect_img = panorama.copy()
+                thickness = max(2, int(max(panorama.shape[:2]) * 0.002))
+                cv2.rectangle(rect_img, (x, y), (x+w, y+h), (0, 255, 0), thickness)
+                rect_path = os.path.join(base_dir, f"{name}_rect{ext}")
+                cv2.imwrite(rect_path, rect_img)
+                print(f"Panorama with crop rect saved to: {rect_path}")
+                
+            # 3. Save cropped (final)
+            cv2.imwrite(output_path, panorama_cropped)
             print(f"Final panorama saved to: {output_path}")
             
         return panorama
