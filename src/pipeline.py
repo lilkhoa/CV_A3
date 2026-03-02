@@ -9,6 +9,9 @@ from feature.orb import extract_orb_features
 from core.matcher import match_features
 from core.homography import estimate_homography
 from core.cylindrical import cylindrical_projection
+from core.warp import warp_images_to_canvas
+from core.blender import voronoi_blend, create_weight_mask
+from utils import crop_black_borders
 
 
 class PanoramaStitcher:
@@ -35,16 +38,6 @@ class PanoramaStitcher:
             return extract_orb_features(gray_image, nfeatures=self.nfeatures)
         else:
             raise ValueError(f"Unsupported feature extraction method: {self.feature_method}")
-
-    def _create_distance_weight_mask(self, mask: np.ndarray) -> np.ndarray:
-        """
-        Create a weight mask using distance transform.
-        Pixels further from the edge (black border) get higher weights.
-        """
-        dist = cv2.distanceTransform(mask.astype(np.uint8), cv2.DIST_L2, 3)
-        if dist.max() > 0:
-            dist = dist / dist.max()
-        return dist
 
     def stitch_folder(self, image_folder: str, output_path: Optional[str] = None) -> Optional[np.ndarray]:
         """
@@ -87,7 +80,7 @@ class PanoramaStitcher:
 
         # Step 3: Compute pairwise homographies between consecutive images
         print("\n[Step 3] Computing pairwise homographies...")
-        pairwise_H = []  # H[i] maps image i -> image i+1
+        pairwise_H = []
         for i in range(n - 1):
             print(f"  Matching image {i+1} <-> image {i+2}...")
             pts1, pts2 = match_features(
@@ -103,7 +96,6 @@ class PanoramaStitcher:
                 
             print(f"  Found {len(pts1)} good matches.")
             
-            # H maps points in image i to image i+1's coordinate system
             H, mask = estimate_homography(pts1, pts2)
             
             if H is None:
@@ -113,10 +105,9 @@ class PanoramaStitcher:
             pairwise_H.append(H)
 
         # Step 4: Chain homographies relative to center image
-        ref = n // 2  # Use middle image as reference (least distortion)
+        ref = n // 2
         print(f"\n[Step 4] Chaining homographies (reference image: {ref+1})...")
         
-        # cumulative_H[i] = transformation from image i to the reference image's coordinate system
         cumulative_H = [None] * n
         cumulative_H[ref] = np.eye(3, dtype=np.float64)
         
@@ -164,45 +155,38 @@ class PanoramaStitcher:
             [0, 0, 1]
         ], dtype=np.float64)
 
-        # Step 6: Warp all images and blend using center-weighted blending
-        print("\n[Step 6] Warping and blending all images...")
+        # Step 6: Warp all images onto the canvas
+        print("\n[Step 6] Warping all images onto canvas...")
         
-        panorama_final = np.zeros((canvas_h, canvas_w, 3), dtype=np.uint8)
-        max_weight = np.zeros((canvas_h, canvas_w), dtype=np.float32)
-
+        # Prepare final homographies (translation + cumulative homography)
+        final_homographies = [Ht @ cumulative_H[i] for i in range(n)]
+        
+        # Warp all images using the unified function
+        warped_images = warp_images_to_canvas(
+            color_images,
+            final_homographies,
+            (canvas_w, canvas_h)
+        )
+        
+        # Create weight masks for Voronoi blending
+        weight_masks = []
         for i in range(n):
-            # Combine translation with the cumulative homography
-            H_final = Ht @ cumulative_H[i]
-            
-            # Warp the color image
-            warped = cv2.warpPerspective(
-                color_images[i],
-                H_final,
+            weight = create_weight_mask(
+                color_images[i].shape[:2],
+                final_homographies[i],
                 (canvas_w, canvas_h)
             )
-            
-            # Create weight mask based on valid pixels of warped image using Distance Transform
-            mask_warped = cv2.warpPerspective(
-                np.ones(color_images[i].shape[:2], dtype=np.uint8) * 255,
-                H_final,
-                (canvas_w, canvas_h)
-            )
-            
-            warped_weight = self._create_distance_weight_mask(mask_warped)
-            
-            # Voronoi blending (sharp seam based on distance to center)
-            win_mask = warped_weight > max_weight
-            panorama_final[win_mask] = warped[win_mask]
-            max_weight[win_mask] = warped_weight[win_mask]
-            
-            print(f"  Image {i+1} warped and blended.")
+            weight_masks.append(weight)
+            print(f"  Image {i+1} warped.")
+        
+        # Step 7: Blend images using Voronoi blending
+        print("\n[Step 7] Blending images using Voronoi blending...")
+        panorama = voronoi_blend(warped_images, weight_masks)
+        print("  Blending complete.")
 
-        panorama = panorama_final
-        # ==============================
-        # Step 7: Crop black borders
-        # ==============================
-        print("\n[Step 7] Cropping black borders...")
-        panorama_cropped, bbox = self._crop_black_borders(panorama)
+        # Step 8: Crop black borders
+        print("\n[Step 8] Cropping black borders...")
+        panorama = crop_black_borders(panorama)
 
         print("\n--- Stitching Pipeline Completed ---")
         
@@ -232,83 +216,4 @@ class PanoramaStitcher:
             cv2.imwrite(output_path, panorama_cropped)
             print(f"Final panorama saved to: {output_path}")
             
-        return panorama_cropped
-
-    def _crop_black_borders(self, img: np.ndarray) -> Tuple[np.ndarray, Optional[Tuple[int, int, int, int]]]:
-        """
-        Crop the black (zero) border regions using the Maximum Inscribed Rectangle algorithm.
-        To ensure speed, it downscales the mask, finds the approximate max rectangle, 
-        and then refines it at full resolution.
-        Returns the cropped image and the bounding box.
-        """
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY)
-        
-        # 1. Downscale for fast approximation
-        # Use INTER_AREA so a downscaled pixel is only 255 if the ENTIRE block is 255
-        scale = 0.25
-        small_mask = cv2.resize(thresh, (0,0), fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
-        _, small_mask = cv2.threshold(small_mask, 254, 255, cv2.THRESH_BINARY)
-        h, w = small_mask.shape
-        
-        # 2. Find max inscribed rectangle on small mask
-        max_area = 0
-        best_rect = (0, 0, 0, 0)
-        heights = np.zeros(w, dtype=np.int32)
-        
-        for i in range(h):
-            heights = np.where(small_mask[i] > 0, heights + 1, 0)
-            stack = []
-            for j in range(w + 1):
-                curr_h = heights[j] if j < w else 0
-                start_j = j
-                while stack and stack[-1][1] > curr_h:
-                    pos, height = stack.pop()
-                    area = height * (j - pos)
-                    if area > max_area:
-                        max_area = area
-                        best_rect = (pos, i - height + 1, j - pos, height)
-                    start_j = pos
-                stack.append((start_j, curr_h))
-                
-        # 3. Scale back to original resolution
-        x, y, w_r, h_r = best_rect
-        x = int(x / scale)
-        y = int(y / scale)
-        w_r = int(w_r / scale)
-        h_r = int(h_r / scale)
-        
-        # Ensure within bounds
-        h_full, w_full = thresh.shape
-        x = max(0, x)
-        y = max(0, y)
-        w_r = min(w_full - x, w_r)
-        h_r = min(h_full - y, h_r)
-        
-        # 4. Refine at full resolution (shrink if any black pixels remain at edges)
-        while w_r > 0 and h_r > 0:
-            sub_img = thresh[y:y+h_r, x:x+w_r]
-            if cv2.countNonZero(sub_img) == w_r * h_r:
-                break
-                
-            top = w_r - cv2.countNonZero(sub_img[0, :])
-            bottom = w_r - cv2.countNonZero(sub_img[-1, :])
-            left = h_r - cv2.countNonZero(sub_img[:, 0])
-            right = h_r - cv2.countNonZero(sub_img[:, -1])
-            
-            m = max(top, bottom, left, right)
-            if m == top: 
-                y += 1
-                h_r -= 1
-            elif m == bottom: 
-                h_r -= 1
-            elif m == left: 
-                x += 1
-                w_r -= 1
-            else: 
-                w_r -= 1
-                
-        if w_r <= 0 or h_r <= 0:
-            return img, None
-            
-        return img[y:y+h_r, x:x+w_r], (x, y, w_r, h_r)
+        return panorama

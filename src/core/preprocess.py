@@ -70,7 +70,6 @@ def load_and_preprocess_images(
             new_width = max_width
             new_height = int(height * scale_factor)
             
-            # Resize the image
             resized_image = cv2.resize(
                 image,
                 (new_width, new_height),
