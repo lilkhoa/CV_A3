@@ -49,8 +49,8 @@ def match_features(
     # Brute-Force matcher is simple. 
     # It takes the descriptor of one feature in first set and is matched with 
     # all other features in second set using some distance calculation. And the closest one is returned.
-    if method.upper() == 'ORB':
-        # ORB uses binary descriptors -> Hamming distance
+    if method.upper() in ['ORB', 'AKAZE']:
+        # ORB and AKAZE use binary descriptors -> Hamming distance
         matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
     elif method.upper() == 'SIFT':
         # SIFT uses floating-point descriptors -> Euclidean distance
