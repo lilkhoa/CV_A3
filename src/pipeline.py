@@ -11,7 +11,7 @@ from core.matcher import match_features
 from core.homography import estimate_homography
 from core.cylindrical import cylindrical_projection
 from core.warp import warp_images_to_canvas
-from core.blender import voronoi_blend, alpha_blend, create_weight_mask
+from core.blender import voronoi_blend, alpha_blend, create_weight_mask, multiband_blend
 from utils import crop_black_borders
 
 
@@ -184,7 +184,7 @@ class PanoramaStitcher:
         
         # Step 7: Blend images
         print("\n[Step 7] Blending images using Alpha blending...")
-        panorama = alpha_blend(warped_images, weight_masks)
+        panorama = multiband_blend(warped_images, weight_masks)
         print("  Blending complete.")
 
         # Step 8: Crop black borders
