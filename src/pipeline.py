@@ -183,7 +183,7 @@ class PanoramaStitcher:
             print(f"  Image {i+1} warped.")
         
         # Step 7: Blend images
-        print("\n[Step 7] Blending images using Alpha blending...")
+        print("\n[Step 7] Blending images using Multiband blending...")
         panorama = multiband_blend(warped_images, weight_masks)
         print("  Blending complete.")
 
