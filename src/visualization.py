@@ -444,12 +444,12 @@ def save_all_visualizations(
 
 if __name__ == "__main__":
 
-    image_folder = os.path.join('data', 'BK-H6-imgs')
+    image_folder = os.path.join('data', 'AH-new')
     image_dict = load_and_preprocess_images(image_folder)
     color_images = get_image_list(image_dict['color'])
     gray_images = get_image_list(image_dict['grayscale'])
     
-    stitcher = PanoramaStitcher(feature_method='ORB', nfeatures=2000, match_ratio=0.75)
+    stitcher = PanoramaStitcher(feature_method='SIFT', nfeatures=2000, match_ratio=0.75)
     
     all_kp = []
     all_desc = []
