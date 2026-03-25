@@ -6,11 +6,12 @@ from typing import List, Tuple, Optional
 from core.preprocess import load_and_preprocess_images, get_image_list
 from feature.sift import extract_sift_features
 from feature.orb import extract_orb_features
+from feature.akaze import extract_akaze_features
 from core.matcher import match_features
 from core.homography import estimate_homography
 from core.cylindrical import cylindrical_projection
 from core.warp import warp_images_to_canvas
-from core.blender import voronoi_blend, alpha_blend, create_weight_mask
+from core.blender import voronoi_blend, alpha_blend, create_weight_mask, multiband_blend
 from utils import crop_black_borders
 
 
@@ -36,6 +37,8 @@ class PanoramaStitcher:
             return extract_sift_features(gray_image, nfeatures=self.nfeatures)
         elif self.feature_method == 'ORB':
             return extract_orb_features(gray_image, nfeatures=self.nfeatures)
+        elif self.feature_method == 'AKAZE':
+            return extract_akaze_features(gray_image, nfeatures=self.nfeatures)
         else:
             raise ValueError(f"Unsupported feature extraction method: {self.feature_method}")
 
@@ -181,7 +184,7 @@ class PanoramaStitcher:
         
         # Step 7: Blend images
         print("\n[Step 7] Blending images using Alpha blending...")
-        panorama = alpha_blend(warped_images, weight_masks)
+        panorama = multiband_blend(warped_images, weight_masks)
         print("  Blending complete.")
 
         # Step 8: Crop black borders

@@ -7,7 +7,7 @@ def main():
     parser = argparse.ArgumentParser(description="Image Stitching Pipeline (Panorama)")
     parser.add_argument("--input", type=str, required=True, help="Path to folder containing input images")
     parser.add_argument("--output", type=str, default="results/panorama.jpg", help="Path to save the output panorama")
-    parser.add_argument("--method", type=str, choices=['SIFT', 'ORB'], default='SIFT', help="Feature extraction method")
+    parser.add_argument("--method", type=str, choices=['SIFT', 'ORB', 'AKAZE'], default='SIFT', help="Feature extraction method")
     parser.add_argument("--features", type=int, default=3000, help="Number of features to extract")
     parser.add_argument("--ratio", type=float, default=0.75, help="Lowe's ratio test threshold")
     
