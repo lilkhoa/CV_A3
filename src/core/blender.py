@@ -88,47 +88,6 @@ def voronoi_blend(
     
     return blended
 
-def create_weight_mask(
-    image_shape: Tuple[int, int],
-    H: np.ndarray,
-    canvas_size: Tuple[int, int]
-) -> np.ndarray:
-    """
-    Create a weight mask for an image after warping.
-    
-    Parameters
-    ----------
-    image_shape : Tuple[int, int]
-        Original image shape as (height, width)
-    H : np.ndarray
-        Homography matrix
-    canvas_size : Tuple[int, int]
-        Canvas size as (width, height)
-    
-    Returns
-    -------
-    np.ndarray
-        Normalized weight mask (0.0 to 1.0)
-    """
-    h, w = image_shape
-    canvas_w, canvas_h = canvas_size
-    
-    # Create a binary mask for the original image
-    mask = np.ones((h, w), dtype=np.uint8) * 255
-    warped_mask = cv2.warpPerspective(
-        mask,
-        H,
-        (canvas_w, canvas_h)
-    )
-    
-    dist = cv2.distanceTransform(warped_mask.astype(np.uint8), cv2.DIST_L2, 3)
-    if dist.max() > 0:
-        dist = dist / dist.max()
-    
-    return dist.astype(np.float32)
-
-
-
 def multiband_blend(
     warped_images: List[np.ndarray],
     weight_masks: List[np.ndarray],
@@ -195,23 +154,39 @@ def create_weight_mask(
     H: np.ndarray,
     canvas_size: Tuple[int, int]
 ) -> np.ndarray:
-    h, w = image_shape[:2]
+    """
+    Create a weight mask for an image after warping.
+    
+    Parameters
+    ----------
+    image_shape : Tuple[int, int]
+        Original image shape as (height, width)
+    H : np.ndarray
+        Homography matrix
+    canvas_size : Tuple[int, int]
+        Canvas size as (width, height)
+    
+    Returns
+    -------
+    np.ndarray
+        Normalized weight mask (0.0 to 1.0)
+    """
+    h, w = image_shape
     canvas_w, canvas_h = canvas_size
- 
+    
+    # Create a binary mask for the original image
     mask = np.ones((h, w), dtype=np.uint8) * 255
     warped_mask = cv2.warpPerspective(
         mask,
         H,
-        (canvas_w, canvas_h),
-        flags=cv2.INTER_NEAREST
+        (canvas_w, canvas_h)
     )
- 
-    dist = cv2.distanceTransform(warped_mask, cv2.DIST_L2, cv2.DIST_MASK_5)
+    
+    dist = cv2.distanceTransform(warped_mask.astype(np.uint8), cv2.DIST_L2, 3)
     if dist.max() > 0:
         dist = dist / dist.max()
- 
+    
     return dist.astype(np.float32)
- 
  
 def _build_gaussian_pyramid(
     img: np.ndarray,
